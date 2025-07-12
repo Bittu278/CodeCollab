@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import Client from "./Client";
 import Editor from "./Editor";
 import { initSocket } from "../Socket";
@@ -11,25 +11,12 @@ import {
 } from "react-router-dom";
 import { toast } from "react-hot-toast";
 import axios from "axios";
+import Chat from "./Chat";
 
 // List of supported languages
 const LANGUAGES = [
-  "python3",
-  "java",
-  "cpp",
-  "nodejs",
-  "c",
-  "ruby",
-  "go",
-  "scala",
-  "bash",
-  "sql",
-  "pascal",
-  "csharp",
-  "php",
-  "swift",
-  "rust",
-  "r",
+  "python3", "java", "cpp", "nodejs", "c", "ruby", "go", "scala", "bash",
+  "sql", "pascal", "csharp", "php", "swift", "rust", "r",
 ];
 
 function EditorPage() {
@@ -40,61 +27,85 @@ function EditorPage() {
   const [selectedLanguage, setSelectedLanguage] = useState("python3");
   const codeRef = useRef(null);
 
-  const Location = useLocation();
+  const location = useLocation();
   const navigate = useNavigate();
   const { roomId } = useParams();
 
+  // Always get username from localStorage as fallback
+  const username = location.state?.username || localStorage.getItem("username");
+
   const socketRef = useRef(null);
 
+  // Memoized code change handler
+  const onCodeChange = useCallback((code) => {
+    codeRef.current = code;
+  }, []);
+
   useEffect(() => {
+    // If username is missing, redirect to login/home
+    if (!username || typeof username !== "string" || !username.trim()) {
+      toast.error("Username not found. Please login again.");
+      navigate("/login");
+      return;
+    }
+
+    let socketInstance;
+
+    const handleErrors = (err) => {
+      console.error("Socket error:", err);
+      toast.error("Socket connection failed, Try again later");
+      navigate("/");
+    };
+
     const init = async () => {
-      socketRef.current = await initSocket();
-      socketRef.current.on("connect_error", (err) => handleErrors(err));
-      socketRef.current.on("connect_failed", (err) => handleErrors(err));
+      socketInstance = await initSocket();
+      socketRef.current = socketInstance;
 
-      const handleErrors = (err) => {
-        console.log("Error", err);
-        toast.error("Socket connection failed, Try again later");
-        navigate("/");
-      };
+      socketInstance.on("connect_error", handleErrors);
+      socketInstance.on("connect_failed", handleErrors);
 
-      socketRef.current.emit(ACTIONS.JOIN, {
+      // Only emit join if username is valid
+      socketInstance.emit(ACTIONS.JOIN, {
         roomId,
-        username: Location.state?.username,
+        username,
       });
 
-      socketRef.current.on(
+      socketInstance.on(
         ACTIONS.JOINED,
-        ({ clients, username, socketId }) => {
-          if (username !== Location.state?.username) {
-            toast.success(`${username} joined the room.`);
+        ({ clients, username: joinedUsername, socketId }) => {
+          if (joinedUsername !== username) {
+            toast.success(`${joinedUsername} joined the room.`);
           }
-          setClients(clients);
-          socketRef.current.emit(ACTIONS.SYNC_CODE, {
+          // Only show clients with valid usernames
+          setClients(clients.filter(c => c.username && c.username.trim()));
+          // Sync code to new user
+          socketInstance.emit(ACTIONS.SYNC_CODE, {
             code: codeRef.current,
             socketId,
           });
         }
       );
 
-      socketRef.current.on(ACTIONS.DISCONNECTED, ({ socketId, username }) => {
-        toast.success(`${username} left the room`);
-        setClients((prev) => {
-          return prev.filter((client) => client.socketId !== socketId);
-        });
+      socketInstance.on(ACTIONS.DISCONNECTED, ({ socketId, username: leftUsername }) => {
+        toast.success(`${leftUsername} left the room`);
+        setClients((prev) => prev.filter((client) => client.socketId !== socketId));
       });
     };
+
     init();
 
     return () => {
-      socketRef.current && socketRef.current.disconnect();
-      socketRef.current.off(ACTIONS.JOINED);
-      socketRef.current.off(ACTIONS.DISCONNECTED);
+      if (socketInstance) {
+        socketInstance.off(ACTIONS.JOINED);
+        socketInstance.off(ACTIONS.DISCONNECTED);
+        socketInstance.disconnect();
+      }
     };
-  }, []);
+  }, [roomId, username, navigate]);
 
-  if (!Location.state) {
-    return <Navigate to="/" />;
+  // Defensive: if username is missing, redirect
+  if (!username || typeof username !== "string" || !username.trim()) {
+    return <Navigate to="/login" />;
   }
 
   const copyRoomId = async () => {
@@ -102,12 +113,12 @@ function EditorPage() {
       await navigator.clipboard.writeText(roomId);
       toast.success(`Room ID is copied`);
     } catch (error) {
-      console.log(error);
+      console.error(error);
       toast.error("Unable to copy the room ID");
     }
   };
 
-  const leaveRoom = async () => {
+  const leaveRoom = () => {
     navigate("/");
   };
 
@@ -118,7 +129,6 @@ function EditorPage() {
         code: codeRef.current,
         language: selectedLanguage,
       });
-      console.log("Backend response:", response.data);
       setOutput(response.data.output || JSON.stringify(response.data));
     } catch (error) {
       console.error("Error compiling code:", error);
@@ -129,7 +139,7 @@ function EditorPage() {
   };
 
   const toggleCompileWindow = () => {
-    setIsCompileWindowOpen(!isCompileWindowOpen);
+    setIsCompileWindowOpen((prev) => !prev);
   };
 
   return (
@@ -137,13 +147,18 @@ function EditorPage() {
       <div className="row flex-grow-1">
         {/* Client panel */}
         <div className="col-md-2 bg-dark text-light d-flex flex-column">
-          <img
-            src="/images/codecast.png"
-            alt="Logo"
-            className="img-fluid mx-auto"
-            style={{ maxWidth: "150px", marginTop: "-43px" }}
-          />
-          <hr style={{ marginTop: "-3rem" }} />
+        <div className="d-flex align-items-center justify-content-center mt-3 mb-2">
+    <img
+      src="/images/mylogo.png"
+      alt="CodeCollab Logo"
+      className="img-fluid"
+      style={{ maxWidth: "40px", marginRight: "10px" }}
+    />
+    <h3 className="text-primary m-0" style={{ fontWeight: "bold", letterSpacing: "1px" }}>
+      CodeCollab
+    </h3>
+  </div>
+  <hr style={{ marginTop: "rem" }} />
 
           {/* Client list container */}
           <div className="d-flex flex-column flex-grow-1 overflow-auto">
@@ -151,22 +166,20 @@ function EditorPage() {
             {clients.map((client) => (
               <Client key={client.socketId} username={client.username} />
             ))}
-          </div>
-
-          <hr />
-          {/* Buttons */}
-          <div className="mt-auto mb-3">
-            <button className="btn btn-success w-100 mb-2" onClick={copyRoomId}>
-              Copy Room ID
-            </button>
-            <button className="btn btn-danger w-100" onClick={leaveRoom}>
-              Leave Room
-            </button>
+            {/* Room actions */}
+            <div className="mt-3">
+              <button className="btn btn-success w-100 mb-2" onClick={copyRoomId}>
+                Copy Room ID
+              </button>
+              <button className="btn btn-danger w-100" onClick={leaveRoom}>
+                Leave Room
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Editor panel */}
-        <div className="col-md-10 text-light d-flex flex-column">
+        {/* Editor and Chat panel */}
+        <div className="col-md-10 text-light d-flex flex-column flex-grow-1" style={{ minHeight: 0 }}>
           {/* Language selector */}
           <div className="bg-dark p-2 d-flex justify-content-end">
             <select
@@ -182,30 +195,29 @@ function EditorPage() {
             </select>
           </div>
 
-          <Editor
-            socketRef={socketRef}
-            roomId={roomId}
-            onCodeChange={(code) => {
-              codeRef.current = code;
-            }}
-          />
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto", position: "relative" }}>
+            <Editor
+              socketRef={socketRef}
+              roomId={roomId}
+              onCodeChange={onCodeChange}
+            />
+            {/* Compiler toggle button */}
+            <button
+              className="btn btn-primary open-compiler-btn"
+              onClick={toggleCompileWindow}
+            >
+              {isCompileWindowOpen ? "Close Compiler" : "Open Compiler"}
+            </button>
+          </div>
+          <div className="mt-3" style={{ flexShrink: 0 }}>
+            <Chat roomId={roomId} username={username} socket={socketRef.current}/>
+          </div>
         </div>
       </div>
 
-      {/* Compiler toggle button */}
-      <button
-        className="btn btn-primary position-fixed bottom-0 end-0 m-3"
-        onClick={toggleCompileWindow}
-        style={{ zIndex: 1050 }}
-      >
-        {isCompileWindowOpen ? "Close Compiler" : "Open Compiler"}
-      </button>
-
       {/* Compiler section */}
       <div
-        className={`bg-dark text-light p-3 ${
-          isCompileWindowOpen ? "d-block" : "d-none"
-        }`}
+        className={`bg-dark text-light p-3 ${isCompileWindowOpen ? "d-block" : "d-none"}`}
         style={{
           position: "fixed",
           bottom: 0,

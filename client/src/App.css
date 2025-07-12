@@ -1,5 +1,5 @@
 .codemirror {
-  min-height: "calc(100vh -20px)";
+  min-height: calc(100vh - 20px);
   font-size: "20px";
   line-height: "1.6";
   padding-top: "20px";
@@ -32,3 +32,58 @@
   overflow-y: auto;
   border: 1px solid #ced4da;
 }
+.btn-custom:hover {
+  background-color: #0056b3;
+  transform: scale(1.05);
+  transition: all 0.3s ease;
+}
+/* For Open Compiler button */
+.open-compiler-btn {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1050;
+}
+/* For Send button (inside chat bar) */
+.chat-send-btn {
+  /* Remove position: absolute/fixed! */
+  margin-left: 10px;
+}
+
+/* Chat container and message styles for better visibility */
+.chat-container {
+   position: relative;
+  background: #23272f;
+  color: #f8f9fa;
+  border-radius: 8px;
+  padding: 10px;
+   min-height: 350px; /* Increase this value for a taller chat area */
+  display: flex;
+  flex-direction: column;
+   min-height: 350px;
+  
+}
+.chat-container input::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+  opacity: 1;
+}
+.chat-messages {
+  background: #2c2f36;
+  color: #f8f9fa;
+  border-radius: 4px;
+  padding: 10px;
+  min-height: 250px;
+  max-height: 300px;
+  flex: 1;
+  overflow-y: auto;
+}
+.chat-container form {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  background: #23272f;
+  padding: 10px;
+}
+
+
